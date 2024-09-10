@@ -25,19 +25,25 @@ var _dialTimeout = 200 * time.Millisecond
 var followRedirect = false
 
 func init() {
+
 	var err error
+
 	if v := os.Getenv("PROXY_DIAL_TIMEOUT"); v != "" {
 		if _dialTimeout, err = time.ParseDuration(v); err != nil {
 			panic(err)
 		}
 	}
+
 	if val := os.Getenv("PROXY_FOLLOW_REDIRECT"); val != "" {
 		followRedirect = true
 	}
+
 	prometheus.MustRegister(_metricClientRedirect)
+
 }
 
 var _metricClientRedirect = prometheus.NewCounterVec(prometheus.CounterOpts{
+
 	Namespace: "go",
 	Subsystem: "gateway",
 	Name:      "client_redirect_total",
@@ -45,20 +51,29 @@ var _metricClientRedirect = prometheus.NewCounterVec(prometheus.CounterOpts{
 }, []string{"protocol", "method", "path", "service", "basePath"})
 
 func defaultCheckRedirect(req *http.Request, via []*http.Request) error {
+
 	labels, ok := middleware.MetricsLabelsFromContext(req.Context())
+
 	if ok {
 		_metricClientRedirect.WithLabelValues(labels.Protocol(), labels.Method(), labels.Path(), labels.Service(), labels.BasePath()).Inc()
 	}
+
 	if followRedirect {
+
 		if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
 		}
+
 		return nil
+
 	}
+
 	return http.ErrUseLastResponse
+
 }
 
 func defaultClient() *http.Client {
+
 	return &http.Client{
 		CheckRedirect: defaultCheckRedirect,
 		Transport: &http.Transport{
@@ -76,9 +91,11 @@ func defaultClient() *http.Client {
 			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}
+
 }
 
 func defaultH2CClient() *http.Client {
+
 	return &http.Client{
 		CheckRedirect: defaultCheckRedirect,
 		Transport: &http2.Transport{
@@ -92,9 +109,11 @@ func defaultH2CClient() *http.Client {
 			},
 		},
 	}
+
 }
 
 func createHTTPSClient(tlsConfig *tls.Config) *http.Client {
+
 	tr := &http.Transport{
 		TLSClientConfig: tlsConfig,
 		Proxy:           http.ProxyFromEnvironment,
@@ -110,11 +129,14 @@ func createHTTPSClient(tlsConfig *tls.Config) *http.Client {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
+
 	_ = http2.ConfigureTransport(tr)
+
 	return &http.Client{
 		CheckRedirect: defaultCheckRedirect,
 		Transport:     tr,
 	}
+
 }
 
 type HTTPSClientStore struct {
@@ -123,28 +145,42 @@ type HTTPSClientStore struct {
 }
 
 func NewHTTPSClientStore(clientConfigs map[string]*tls.Config) *HTTPSClientStore {
+
 	return &HTTPSClientStore{
 		clientConfigs: clientConfigs,
 		clients:       make(map[string]*http.Client),
 	}
+
 }
 
 func (s *HTTPSClientStore) GetClient(name string) *http.Client {
+
 	if name == "" {
 		return _globalClient
 	}
+
 	client, ok := s.clients[name]
+
 	if ok {
 		return client
 	}
+
 	tlsConfig, ok := s.clientConfigs[name]
+
 	if !ok {
+
 		LOG.Warnf("tls config not found for %s, using default instead", name)
+
 		return _globalHTTPSClient
+
 	}
+
 	client = createHTTPSClient(tlsConfig)
+
 	s.clients[name] = client
+
 	return client
+
 }
 
 type NodeOptions struct {
@@ -154,18 +190,23 @@ type NodeOptions struct {
 type NewNodeOption func(*NodeOptions)
 
 func WithTLS(in bool) NewNodeOption {
+
 	return func(o *NodeOptions) {
 		o.TLS = in
 	}
+
 }
 
 func WithTLSConfigName(in string) NewNodeOption {
+
 	return func(o *NodeOptions) {
 		o.TLSConfigName = in
 	}
+
 }
 
 func newNode(ctx *BuildContext, addr string, protocol config.Protocol, weight *int64, md map[string]string, version string, name string, opts ...NewNodeOption) *node {
+
 	node := &node{
 		protocol: protocol,
 		address:  addr,
@@ -174,22 +215,32 @@ func newNode(ctx *BuildContext, addr string, protocol config.Protocol, weight *i
 		version:  version,
 		name:     name,
 	}
+
 	node.client = _globalClient
+
 	if protocol == config.Protocol_GRPC {
 		node.client = _globalH2CClient
 	}
+
 	opt := &NodeOptions{}
+
 	for _, o := range opts {
 		o(opt)
 	}
+
 	if opt.TLS {
+
 		node.tls = true
 		node.client = _globalHTTPSClient
+
 		if opt.TLSConfigName != "" {
 			node.client = ctx.TLSClientStore.GetClient(opt.TLSConfigName)
 		}
+
 	}
+
 	return node
+
 }
 
 type node struct {

@@ -33,28 +33,34 @@ func (d *discoveryRegistry) Register(name string, factory Factory) {
 }
 
 func (d *discoveryRegistry) Create(discoveryDSN string) (registry.Discovery, error) {
+
 	if discoveryDSN == "" {
 		return nil, fmt.Errorf("discoveryDSN is empty")
 	}
 
 	dsn, err := url.Parse(discoveryDSN)
+
 	if err != nil {
 		return nil, fmt.Errorf("parse discoveryDSN error: %s", err)
 	}
 
 	factory, ok := d.discovery[dsn.Scheme]
+
 	if !ok {
 		return nil, fmt.Errorf("discovery %s has not been registered", dsn.Scheme)
 	}
 
 	impl, err := factory(dsn)
+
 	if err != nil {
 		return nil, fmt.Errorf("create discovery error: %s", err)
 	}
+
 	return impl, nil
+
 }
 
-// Register registers one discovery.
+// Register registers one discovery. 注册服务发现服务：consul、nacos、zookeeper
 func Register(name string, factory Factory) {
 	globalRegistry.Register(name, factory)
 }

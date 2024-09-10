@@ -39,7 +39,7 @@ import (
 var (
 	ctrlName          string
 	ctrlService       string
-	discoveryDSN      string
+	discoveryDSN      string // 注册中心地址
 	proxyAddrs        = newSliceVar(":8080")
 	proxyConfig       string
 	priorityConfigDir string
@@ -67,6 +67,7 @@ func (s *sliceVar) Set(val string) error {
 func (s *sliceVar) String() string { return fmt.Sprintf("%+v", *s) }
 
 func init() {
+
 	rand.Seed(uint64(time.Now().Nanosecond()))
 
 	flag.BoolVar(&withDebug, "debug", false, "enable debug handlers")
@@ -79,84 +80,130 @@ func init() {
 }
 
 func makeDiscovery() registry.Discovery {
+
 	if discoveryDSN == "" {
 		return nil
 	}
+
 	d, err := discovery.Create(discoveryDSN)
+
 	if err != nil {
 		log.Fatalf("failed to create discovery: %v", err)
 	}
+
 	return d
+
 }
 
 func main() {
+
 	flag.Parse()
 
 	clientFactory := client.NewFactory(makeDiscovery())
+
 	p, err := proxy.New(clientFactory, middleware.Create)
+
 	if err != nil {
 		log.Fatalf("failed to new proxy: %v", err)
 	}
 
 	ctx := context.Background()
+
 	var ctrlLoader *configLoader.CtrlConfigLoader
+
 	if ctrlService != "" {
+
 		log.Infof("setup control service to: %q", ctrlService)
+
 		ctrlLoader = configLoader.New(ctrlName, ctrlService, proxyConfig, priorityConfigDir)
+
 		if err := ctrlLoader.Load(ctx); err != nil {
 			log.Errorf("failed to do initial load from control service: %v, using local config instead", err)
 		}
+
 		if err := ctrlLoader.LoadFeatures(ctx); err != nil {
 			log.Errorf("failed to do initial feature load from control service: %v, using default value instead", err)
 		}
+
 		go ctrlLoader.Run(ctx)
+
 	}
 
 	confLoader, err := config.NewFileLoader(proxyConfig, priorityConfigDir)
+
 	if err != nil {
 		log.Fatalf("failed to create config file loader: %v", err)
 	}
+
 	defer confLoader.Close()
+
 	bc, err := confLoader.Load(context.Background())
+
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
 	buildContext := client.NewBuildContext(bc)
+
 	circuitbreaker.Init(buildContext, clientFactory)
+
 	if err := p.Update(buildContext, bc); err != nil {
 		log.Fatalf("failed to update service config: %v", err)
 	}
+
 	reloader := func() error {
+
 		bc, err := confLoader.Load(context.Background())
+
 		if err != nil {
+
 			log.Errorf("failed to load config: %v", err)
+
 			return err
+
 		}
+
 		buildContext := client.NewBuildContext(bc)
+
 		circuitbreaker.SetBuildContext(buildContext)
+
 		if err := p.Update(buildContext, bc); err != nil {
+
 			log.Errorf("failed to update service config: %v", err)
+
 			return err
+
 		}
+
 		log.Infof("config reloaded")
+
 		return nil
+
 	}
+
 	confLoader.Watch(reloader)
 
 	var serverHandler http.Handler = p
+
 	if withDebug {
+
 		debug.Register("proxy", p)
 		debug.Register("config", confLoader)
+
 		if ctrlLoader != nil {
 			debug.Register("ctrl", ctrlLoader)
 		}
+
 		serverHandler = debug.MashupWithDebugHandler(p)
+
 	}
+
 	servers := make([]transport.Server, 0, len(proxyAddrs.Get()))
+
 	for _, addr := range proxyAddrs.Get() {
 		servers = append(servers, server.NewProxy(serverHandler, addr))
 	}
+
 	app := kratos.New(
 		kratos.Name(bc.Name),
 		kratos.Context(ctx),
@@ -164,7 +211,9 @@ func main() {
 			servers...,
 		),
 	)
+
 	if err := app.Run(); err != nil {
 		log.Errorf("failed to run servers: %v", err)
 	}
+
 }
